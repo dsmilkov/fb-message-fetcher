@@ -13,7 +13,7 @@
   },
   "main" : "lib/fetcher.js",
   "scripts": {
-  	"prepublish": "coffee -o lib/ -c src/"
+  	"prepublish": "coffee -o lib/ -c src/ && coffee -c test/"
   },
   "dependencies": {
   	"fb" : "*",
