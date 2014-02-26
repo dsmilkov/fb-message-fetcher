@@ -9,7 +9,7 @@
   "keywords": ["facebook", "message", "conversation", "fetcher"],
   "repository": {
   	"type": "git",
-  	"url": "git://github.com//fb-message-fetcher.git"
+  	"url": "https://github.com/dsmilkov/fb-message-fetcher.git"
   },
   "main" : "lib/fetcher.js",
   "scripts": {
