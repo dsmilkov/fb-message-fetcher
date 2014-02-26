@@ -1,5 +1,8 @@
 {
-  "author": "Daniel Smilkov <dsmilkov@gmail.com>",
+  "author": {
+    "name": "Daniel Smilkov",
+    "url" : "http://smilkov.com"
+  },
   "name": "fb-message-fetcher",
   "description": "Download all facebook conversations using the Facebook API",
   "version": "0.0.1",
