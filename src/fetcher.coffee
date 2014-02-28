@@ -16,7 +16,8 @@ shuffleArray = (array) ->
     [array[i], array[j]] = [array[j], array[i]]
 
 getThreadCount = (callback) ->
-  query = "SELECT total_threads FROM unified_thread_count WHERE folder = 'inbox' OR folder = 'other'"
+  query = "SELECT total_threads FROM unified_thread_count WHERE " + 
+    "folder = 'inbox' OR folder = 'other'"
   FB.api 'fql', { q: query }, (res) ->
     return callback new Error res.error.message if not res? or res.error  
     thread_count = 0
@@ -24,8 +25,16 @@ getThreadCount = (callback) ->
     callback null, thread_count
 
 getThreads = (offset, callback) ->
-  console.log "making threads fql query with offset " + offset
-  query = "SELECT thread_id, thread_fbid, name, num_messages, former_participants, participants, timestamp FROM unified_thread WHERE folder = 'inbox' OR folder = 'other' limit " + LIMIT_THREADS + " offset " + offset
+  fields = ["thread_id",
+            "thread_fbid",
+            "name",
+            "num_messages",
+            "former_participants",
+            "participants",
+            "timestamp"
+  ]
+  query = "SELECT " + fields.join(',') + " FROM unified_thread WHERE " +
+    "folder = 'inbox' OR folder = 'other' limit " + LIMIT_THREADS + " offset " + offset
   FB.api 'fql', {q: query}, (res) ->
     return callback new Error res.error.message if not res? or res.error
     callback null, res.data
@@ -45,7 +54,13 @@ getAllThreads = (thread_count, callback) ->
  
 getMessages = (thread_ids, callback) -> 
   thread_ids = ("'" + threadid + "'" for threadid in thread_ids).join ','
-  query = "SELECT thread_id, timestamp, sender, body FROM unified_message WHERE thread_id IN (" + thread_ids + ") limit " + LIMIT_MESSAGES + " offset 0"
+  fields = ['thread_id',
+            'timestamp',
+            'sender',
+            'body'
+  ]
+  query = "SELECT " + fields.join(',') + " FROM unified_message WHERE " + 
+    "thread_id IN (" + thread_ids + ") limit " + LIMIT_MESSAGES + " offset 0"
   FB.api 'fql', { q: query }, (res) ->
     return callback new Error res.error.message if not res? or res.error  
     callback null, res.data
@@ -106,10 +121,10 @@ exports.downloadFBMessages = (accessToken, callback) ->
     callback(err) if err
     getAllThreads thread_count, (err, threads) ->
       callback(err) if err
-      console.log "Downloaded #{threads.length} threads"
+      #console.log "Downloaded #{threads.length} threads"
       getAllMessages threads, (err, messages) ->
         callback(err) if err
-        console.log "Downloaded #{messages.length} messages"
+        #console.log "Downloaded #{messages.length} messages"
         # find all senders
         people = {}
         threadid2thread = {}
