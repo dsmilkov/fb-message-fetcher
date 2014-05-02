@@ -1,10 +1,10 @@
-FB = require('fb')
-async = require('async')
+FB = require 'fb'
+async = require 'async'
 
 LIMIT_THREADS = 100
 LIMIT_MESSAGES = 5000
 THREADS_PER_QUERY = 150
-
+LIMIT_PEOPLE = 1000
 #
 # Randomize array element order in-place.
 #  Using Fisher-Yates shuffle algorithm.
@@ -16,25 +16,21 @@ shuffleArray = (array) ->
     [array[i], array[j]] = [array[j], array[i]]
 
 getThreadCount = (callback) ->
-  query = "SELECT total_threads FROM unified_thread_count WHERE " + 
-    "folder = 'inbox' OR folder = 'other'"
+  query = "SELECT total_count FROM mailbox_folder WHERE " + 
+    "folder_id = 0 OR folder_id = 1"
   FB.api 'fql', { q: query }, (res) ->
     return callback new Error res.error.message if not res? or res.error  
     thread_count = 0
-    thread_count += thread.total_threads for thread in res.data
+    thread_count += thread.total_count for thread in res.data
     callback null, thread_count
 
 getThreads = (offset, callback) ->
   fields = ["thread_id",
-            "thread_fbid",
-            "name",
-            "num_messages",
-            "former_participants",
-            "participants",
-            "timestamp"
+            "message_count",
+            "recipients"
   ]
-  query = "SELECT " + fields.join(',') + " FROM unified_thread WHERE " +
-    "folder = 'inbox' OR folder = 'other' limit " + LIMIT_THREADS + " offset " + offset
+  query = "SELECT " + fields.join(',') + " FROM thread WHERE " +
+    "folder_id = 0 OR folder_id = 1 limit " + LIMIT_THREADS + " offset " + offset
   FB.api 'fql', {q: query}, (res) ->
     return callback new Error res.error.message if not res? or res.error
     callback null, res.data
@@ -50,16 +46,35 @@ getAllThreads = (thread_count, callback) ->
     threads = res.reduce (prev, curr) ->
       prev.concat curr
     , []
-    return callback(null, threads)
+    return callback null, threads
  
+getPeople = (uids, callback) ->
+  fields = ["uid", "name"]
+  query = 'SELECT ' + fields.join(',') + ' FROM user WHERE uid in (' + uids.join(',') + ') limit 5000 offset 0'
+  FB.api 'fql', { q: query }, (res) ->
+    return callback new Error res.error.message if not res? or res.error  
+    callback null, res.data
+
+getAllPeople = (uids, callback) ->
+  calls = for i in [0...Math.ceil(uids.length / LIMIT_PEOPLE)]
+    do (i) ->
+      (callback) -> getPeople uids[i * LIMIT_PEOPLE ... (i+1)*LIMIT_PEOPLE], callback
+  async.parallel calls, (err, res) ->
+    return callback err if err 
+    # join the different results
+    people = res.reduce (prev, curr) ->
+      prev.concat curr
+    , []
+    return callback null, people
+
 getMessages = (thread_ids, callback) -> 
   thread_ids = ("'" + threadid + "'" for threadid in thread_ids).join ','
   fields = ['thread_id',
-            'timestamp',
-            'sender',
+            'created_time',
+            'author_id',
             'body'
   ]
-  query = "SELECT " + fields.join(',') + " FROM unified_message WHERE " + 
+  query = "SELECT " + fields.join(',') + " FROM message WHERE " + 
     "thread_id IN (" + thread_ids + ") limit " + LIMIT_MESSAGES + " offset 0"
   FB.api 'fql', { q: query }, (res) ->
     return callback new Error res.error.message if not res? or res.error  
@@ -87,13 +102,13 @@ firstFit = (threads) ->
   for thread, i in threads
     found = false
     for bin in bins
-      if bin.indexes.length < THREADS_PER_QUERY and bin.nmessages + thread.num_messages <= LIMIT_MESSAGES
+      if bin.indexes.length < THREADS_PER_QUERY and bin.nmessages + thread.message_count <= LIMIT_MESSAGES
         bin.indexes.push i
-        bin.nmessages += thread.num_messages
+        bin.nmessages += thread.message_count
         found = true
         break
     # start a new bin
-    bins.push { nmessages: thread.num_messages, indexes: [i] } if not found  
+    bins.push { nmessages: thread.message_count, indexes: [i] } if not found  
   bins
 
 bestFit = (threads) ->
@@ -102,42 +117,43 @@ bestFit = (threads) ->
     bestbin = null
     min_residual = LIMIT_MESSAGES + 1
     for bin in bins
-      if bin.indexes.length < THREADS_PER_QUERY and bin.nmessages + thread.num_messages <= LIMIT_MESSAGES 
-        resid = LIMIT_MESSAGES - bin.nmessages - thread.num_messages
+      if bin.indexes.length < THREADS_PER_QUERY and bin.nmessages + thread.message_count <= LIMIT_MESSAGES 
+        resid = LIMIT_MESSAGES - bin.nmessages - thread.message_count
         if resid < min_residual 
           min_residual = resid
           bestbin = bin  
     if bestbin?
       bestbin.indexes.push i
-      bestbin.nmessages += thread.num_messages
+      bestbin.nmessages += thread.message_count
     else
       # start a new bin
-      bins.push { nmessages: threads[i].num_messages, indexes: [i] }
+      bins.push { nmessages: threads[i].message_count, indexes: [i] }
 
 exports.downloadFBMessages = (accessToken, callback) ->
   FB.setAccessToken accessToken
 
   getThreadCount (err, thread_count) ->
-    callback(err) if err
+    callback err if err
     getAllThreads thread_count, (err, threads) ->
-      callback(err) if err
+      callback err if err
       #console.log "Downloaded #{threads.length} threads"
       getAllMessages threads, (err, messages) ->
-        callback(err) if err
+        callback err if err
         #console.log "Downloaded #{messages.length} messages"
         # find all senders
         people = {}
         threadid2thread = {}
         for thread in threads
           threadid2thread[thread.thread_id] = thread
-          for participant in thread.former_participants.concat thread.participants
-            people[participant.user_id] = { name: participant.name, email: participant.email } 
-          thread.former_participants = (participant.user_id for participant in thread.former_participants)
-          thread.participants = (participant.user_id for participant in thread.participants)
+          for user_id in thread.recipients
+            people[user_id] = {}
           thread.messages = []  
         # combine messages to threads and compress sender info
         for message in messages
           threadid2thread[message.thread_id].messages.push(message)
-          message.sender = message.sender.user_id
           delete message['thread_id']
-        callback(null, people, threads)
+        getAllPeople Object.keys(people), (err, peopleInfo) ->
+          callback err if err
+          for personInfo in peopleInfo
+            people[personInfo.uid] = { name: personInfo.name }
+          callback null, { people: people, threads: threads }
