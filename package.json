@@ -5,7 +5,7 @@
   },
   "name": "fb-message-fetcher",
   "description": "Download all facebook conversations using the Facebook API",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "keywords": ["facebook", "message", "conversation", "fetcher"],
   "repository": {
   	"type": "git",
