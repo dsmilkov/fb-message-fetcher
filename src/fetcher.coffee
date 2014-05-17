@@ -1,7 +1,7 @@
 FB = require 'fb'
 async = require 'async'
 
-LIMIT_THREADS = 100
+LIMIT_THREADS = 50
 LIMIT_MESSAGES = 5000
 THREADS_PER_QUERY = 150
 LIMIT_PEOPLE = 1000
@@ -16,31 +16,33 @@ shuffleArray = (array) ->
     [array[i], array[j]] = [array[j], array[i]]
 
 getThreadCount = (callback) ->
-  query = "SELECT total_count FROM mailbox_folder WHERE " + 
-    "folder_id = 0 OR folder_id = 1"
+  query = "SELECT folder_id, total_count FROM mailbox_folder WHERE " + 
+    "folder_id = 0"
   FB.api 'fql', { q: query }, (res) ->
     return callback new Error res.error.message if not res? or res.error  
-    thread_count = 0
-    thread_count += thread.total_count for thread in res.data
-    callback null, thread_count
+    callback null, res.data
 
-getThreads = (offset, callback) ->
+getThreads = (offset, folder_id, callback) ->
   fields = ["thread_id",
             "message_count",
             "recipients"
   ]
   query = "SELECT " + fields.join(',') + " FROM thread WHERE " +
-    "folder_id = 0 OR folder_id = 1 limit " + LIMIT_THREADS + " offset " + offset
+    "folder_id = " + folder_id + " limit " + LIMIT_THREADS + " offset " + offset
   FB.api 'fql', {q: query}, (res) ->
     return callback new Error res.error.message if not res? or res.error
     callback null, res.data
 
-getAllThreads = (thread_count, callback) ->
-  # thread_count is an upper bound for the number of threads
-  calls = for i in [0..Math.ceil(thread_count / LIMIT_THREADS)-1]
-    do (i) ->
-      (callback) -> getThreads i * LIMIT_THREADS, callback 
-  async.parallel calls, (err, res) ->
+getAllThreads = (folder_count, callback) ->
+  allcalls = []
+  for folder in folder_count
+    thread_count = parseInt folder.total_count
+    # thread_count is an upper bound for the number of threads
+    calls = for i in [0..Math.ceil(thread_count / LIMIT_THREADS)-1]
+      do (i, folder) ->
+        (callback) -> getThreads i * LIMIT_THREADS, folder.folder_id, callback
+    allcalls = allcalls.concat calls
+  async.parallel allcalls, (err, res) ->
     return callback(err) if err 
     # join the different results
     threads = res.reduce (prev, curr) ->
@@ -132,9 +134,9 @@ bestFit = (threads) ->
 exports.downloadFBMessages = (accessToken, callback) ->
   FB.setAccessToken accessToken
 
-  getThreadCount (err, thread_count) ->
+  getThreadCount (err, folder_count) ->
     callback err if err
-    getAllThreads thread_count, (err, threads) ->
+    getAllThreads folder_count, (err, threads) ->
       callback err if err
       #console.log "Downloaded #{threads.length} threads"
       getAllMessages threads, (err, messages) ->

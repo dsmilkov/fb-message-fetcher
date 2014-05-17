@@ -1,5 +1,6 @@
 fs = require 'fs'
-fbchat = require '../lib/fetcher'
+require 'coffee-script/register'
+fbchat = require '../src/fetcher'
 
 accessToken = process.argv[2]
 
